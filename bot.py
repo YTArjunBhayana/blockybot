@@ -12,6 +12,9 @@ The bot responds to the 'setup' command only from user ID 480751189366013973.
 import os
 import asyncio
 import re
+import random
+import json
+from datetime import datetime, timedelta
 import discord
 from discord import app_commands, Permissions
 from discord.ext import commands
@@ -125,6 +128,7 @@ CATEGORIES_CONFIG = [
         "channels": [
             {"name": "memes", "type": discord.ChannelType.text, "topic": "Theater memes and humor"},
             {"name": "off-topic", "type": discord.ChannelType.text, "topic": "Talk about anything!"},
+            {"name": "games", "type": discord.ChannelType.text, "topic": "Play games and earn Thespian Coins!"},
         ],
         "default_permissions": Permissions(read_messages=True, send_messages=True),
         "role_permissions": {
@@ -150,6 +154,96 @@ SWEAR_WORDS = [
     "chink", "gook", "spic", "kike", "wetback", "fucker", "shitty", "bullshit",
     "goddamn", "jesus christ", "hell", "dammit", "dumbass"
 ]
+
+# Thespian currency system
+CURRENCY_FILE = "thespian_coins.json"
+CURRENCY_NAME = "Thespian Coins"
+
+# Coin economy settings
+COINS_DAILY = 100  # Daily reward
+COINS_GUESS_WIN = 50
+COINS_GUESS_LOSE = 10
+COINS_TRIVIA_WIN = 75
+COINS_TRIVIA_LOSE = 15
+COINS_8BALL_COST = 25
+
+# Games category channel
+GAMES_CATEGORY = "🎮 Fun & Games"
+
+
+def load_coins():
+    """Load coins from file"""
+    if os.path.exists(CURRENCY_FILE):
+        try:
+            with open(CURRENCY_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_coins(coins):
+    """Save coins to file"""
+    with open(CURRENCY_FILE, 'w') as f:
+        json.dump(coins, f, indent=2)
+
+def get_balance(user_id):
+    """Get user's coin balance"""
+    coins = load_coins()
+    return coins.get(str(user_id), 0)
+
+def add_coins(user_id, amount):
+    """Add coins to user"""
+    coins = load_coins()
+    user_id = str(user_id)
+    if user_id not in coins:
+        coins[user_id] = 0
+    coins[user_id] += amount
+    save_coins(coins)
+    return coins[user_id]
+
+def remove_coins(user_id, amount):
+    """Remove coins from user (returns True if successful)"""
+    coins = load_coins()
+    user_id = str(user_id)
+    if coins.get(user_id, 0) >= amount:
+        coins[user_id] -= amount
+        save_coins(coins)
+        return True
+    return False
+
+def set_coins(user_id, amount):
+    """Set user's coin balance"""
+    coins = load_coins()
+    coins[str(user_id)] = amount
+    save_coins(coins)
+
+# Trivia questions (theater themed)
+TRIVIA_QUESTIONS = [
+    {"q": "Who wrote 'Romeo and Juliet'?", "a": "Shakespeare", "options": ["Shakespeare", "Marlowe", "Webster", "Kyd"]},
+    {"q": "What is the term for the backstage area called?", "a": "Wings", "options": ["Wings", "Stage", "Booth", "Set"]},
+    {"q": "Who wrote 'The Phantom of the Opera'?", "a": "Andrew Lloyd Webber", "options": ["Andrew Lloyd Webber", "Cole Porter", "Stephen Sondheim", "Leonard Bernstein"]},
+    {"q": "What is a soliloquy?", "a": "A speech alone on stage", "options": ["A speech alone on stage", "A song in a play", "A fight scene", "An intermission"]},
+    {"q": "What does 'break a leg' mean in theater?", "a": "Good luck", "options": ["Good luck", "Get injured", "End the show", "Take a bow"]},
+    {"q": "Who is the Greek god of theater?", "a": "Dionysus", "options": ["Dionysus", "Apollo", "Athena", "Zeus"]},
+    {"q": "What is a 'matinee'?", "a": "Afternoon performance", "options": ["Afternoon performance", "Opening night", "Dress rehearsal", "Final show"]},
+    {"q": "Who wrote 'Hamlet'?", "a": "Shakespeare", "options": ["Shakespeare", "Molière", "Chekhov", "Ibsen"]},
+    {"q": "What is 'blocking' in theater?", "a": "Planning actor movements", "options": ["Planning actor movements", "Ending a scene", "Setting lights", "Writing dialogue"]},
+    {"q": "What color is used for ghost lighting?", "a": "Blue", "options": ["Blue", "Red", "Green", "White"]},
+]
+
+# 8ball responses
+EIGHT_BALL_RESPONSES = [
+    "Yes, definitely!", "Without a doubt!", "Most definitely!", "Yes!", "Absolutely!",
+    "No way!", "I don't think so!", "Definitely not!", "No!", "Probably not.",
+    "I'm not sure...", "Ask again later!", "I can't predict that!", "Maybe...",
+    "Signs point to yes!", "Reply hazy, try again!", "Better not tell you now.",
+]
+
+# Word bank for guess the word game
+WORD_LIST = ["THESPACTOR", "PRODUCTION", "AUDITION", "SCRIPTS", "CURTAIN", 
+             "ORCHESTRA", "SCENERY", "COSTUME", "REHEARSAL", "DIRECTOR",
+             "STAGEHAND", "LIGHTING", "SOUNDEFFECT", "MAKEUP", "PROPS",
+             "BACKSTAGE", "GREENROOM", "DRESSREHEARSAL", "OPENINGNIGHT", "FINALE"]
 
 
 class SetupBot(commands.Bot):
@@ -317,6 +411,183 @@ class SetupBot(commands.Bot):
                 await interaction.response.send_message(f"✅ Added {role} role to {user.name}!")
             except Exception as e:
                 await interaction.response.send_message(f"❌ Failed: {str(e)}", ephemeral=True)
+        
+        # ======== GAMES & CURRENCY COMMANDS ========
+        
+        # Balance command
+        @self.tree.command(name="balance", description="Check your Thespian Coins balance")
+        @app_commands.describe(user="User to check (optional)")
+        async def balance_command(interaction: discord.Interaction, user: discord.Member = None):
+            target_user = user or interaction.user
+            balance = get_balance(target_user.id)
+            await interaction.response.send_message(f"💰 {target_user.name} has **{balance}** Thespian Coins!")
+        
+        # Daily reward command
+        @self.tree.command(name="daily", description="Claim your daily Thespian Coins reward")
+        async def daily_command(interaction: discord.Interaction):
+            user_id = str(interaction.user.id)
+            coins = load_coins()
+            
+            # Check if already claimed today
+            last_claim = coins.get(f"{user_id}_daily")
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            if last_claim == today:
+                await interaction.response.send_message("❌ You already claimed your daily reward today! Come back tomorrow.", ephemeral=True)
+                return
+            
+            # Add daily coins
+            new_balance = add_coins(interaction.user.id, COINS_DAILY)
+            coins = load_coins()
+            coins[f"{user_id}_daily"] = today
+            save_coins(coins)
+            
+            await interaction.response.send_message(f"✅ You claimed **{COINS_DAILY}** Thespian Coins! Your balance: **{new_balance}**")
+        
+        # Guess the word game
+        @self.tree.command(name="guess", description="Play a word guessing game (costs 20 coins)")
+        @app_commands.describe(guess="Your guess")
+        async def guess_command(interaction: discord.Interaction, guess: str):
+            if not remove_coins(interaction.user.id, 20):
+                await interaction.response.send_message("❌ You need 20 Thespian Coins to play!", ephemeral=True)
+                return
+            
+            target_word = random.choice(WORD_LIST)
+            guess_upper = guess.upper()
+            
+            if guess_upper == target_word:
+                new_balance = add_coins(interaction.user.id, COINS_GUESS_WIN)
+                await interaction.response.send_message(f"🎉 **CORRECT!** The word was **{target_word}**! You won **{COINS_GUESS_WIN}** coins! Balance: **{new_balance}**")
+            else:
+                # Show hint
+                hint = ""
+                for i, char in enumerate(target_word):
+                    if i < len(guess_upper) and char == guess_upper[i]:
+                        hint += char
+                    else:
+                        hint += "_"
+                new_balance = add_coins(interaction.user.id, COINS_GUESS_LOSE)
+                await interaction.response.send_message(f"❌ Wrong! The word was not **{guess_upper}**. Hint: `{' '.join(list(target_word))}`\nYou got **{COINS_GUESS_LOSE}** coins for trying. Balance: **{new_balance}**")
+        
+        # Trivia command
+        @self.tree.command(name="trivia", description="Answer a theater trivia question")
+        @app_commands.describe(answer="Your answer (just the number 1-4)")
+        async def trivia_command(interaction: discord.Interaction, answer: int):
+            if answer < 1 or answer > 4:
+                await interaction.response.send_message("❌ Please choose a number 1-4!", ephemeral=True)
+                return
+            
+            if not remove_coins(interaction.user.id, 25):
+                await interaction.response.send_message("❌ You need 25 Thespian Coins to play!", ephemeral=True)
+                return
+            
+            question = random.choice(TRIVIA_QUESTIONS)
+            correct_idx = question["options"].index(question["a"]) + 1
+            
+            options_text = "\n".join([f"{i}. {opt}" for i, opt in enumerate(question["options"], 1)])
+            
+            if answer == correct_idx:
+                new_balance = add_coins(interaction.user.id, COINS_TRIVIA_WIN)
+                await interaction.response.send_message(f"🎉 **CORRECT!** The answer was **{question['a']}**!\nYou won **{COINS_TRIVIA_WIN}** coins! Balance: **{new_balance}**")
+            else:
+                new_balance = add_coins(interaction.user.id, COINS_TRIVIA_LOSE)
+                await interaction.response.send_message(f"❌ Wrong! The correct answer was **{question['a']}**.\n{options_text}\nYou got **{COINS_TRIVIA_LOSE}** coins for trying. Balance: **{new_balance}**")
+        
+        # 8ball command
+        @self.tree.command(name="8ball", description="Ask the magic 8ball a question")
+        @app_commands.describe(question="Your question")
+        async def eightball_command(interaction: discord.Interaction, question: str):
+            if not remove_coins(interaction.user.id, COINS_8BALL_COST):
+                await interaction.response.send_message(f"❌ You need {COINS_8BALL_COST} Thespian Coins to ask the 8ball!", ephemeral=True)
+                return
+            
+            response = random.choice(EIGHT_BALL_RESPONSES)
+            new_balance = add_coins(interaction.user.id, 5)  # Get 5 coins back
+            
+            embed = discord.Embed(title="🎱 Magic 8ball", color=discord.Color.purple())
+            embed.add_field(name="Question", value=question, inline=False)
+            embed.add_field(name="Answer", value=response, inline=False)
+            embed.set_footer(text=f"Cost: {COINS_8BALL_COST} coins | You got 5 back | Balance: {new_balance}")
+            
+            await interaction.response.send_message(embed=embed)
+        
+        # Leaderboard command
+        @self.tree.command(name="leaderboard", description="Show top Thespian Coin holders")
+        async def leaderboard_command(interaction: discord.Interaction):
+            coins = load_coins()
+            
+            # Filter out daily claim keys
+            balances = {k: v for k, v in coins.items() if not k.endswith("_daily")}
+            
+            if not balances:
+                await interaction.response.send_message("No one has any coins yet!", ephemeral=True)
+                return
+            
+            sorted_balances = sorted(balances.items(), key=lambda x: x[1], reverse=True)[:10]
+            
+            leaderboard_text = "🏆 **Top Thespian Coin Holders**\n\n"
+            for i, (user_id, balance) in enumerate(sorted_balances, 1):
+                user = self.get_user(int(user_id))
+                name = user.name if user else f"User {user_id}"
+                leaderboard_text += f"{i}. {name}: **{balance}** coins\n"
+            
+            await interaction.response.send_message(leaderboard_text)
+        
+        # Give coins command
+        @self.tree.command(name="give", description="Give coins to another user")
+        @app_commands.describe(user="User to give coins to", amount="Amount of coins")
+        async def give_command(interaction: discord.Interaction, user: discord.Member, amount: int):
+            if amount < 1:
+                await interaction.response.send_message("❌ Amount must be at least 1!", ephemeral=True)
+                return
+            
+            if not remove_coins(interaction.user.id, amount):
+                await interaction.response.send_message(f"❌ You don't have enough coins! Balance: {get_balance(interaction.user.id)}", ephemeral=True)
+                return
+            
+            add_coins(user.id, amount)
+            await interaction.response.send_message(f"✅ You gave **{amount}** Thespian Coins to {user.name}!")
+        
+        # Add coins (mod only)
+        @self.tree.command(name="addcoins", description="Add coins to a user (staff only)")
+        @app_commands.describe(user="User to give coins", amount="Amount of coins")
+        async def addcoins_command(interaction: discord.Interaction, user: discord.Member, amount: int):
+            mod_roles = ["Admin", "Moderator", "Director", "Stage Manager"]
+            user_roles = [r.name for r in interaction.user.roles]
+            has_mod = any(mod_role in user_roles for mod_role in mod_roles)
+            
+            if not has_mod:
+                await interaction.response.send_message("❌ Only staff can use this command!", ephemeral=True)
+                return
+            
+            if amount < 1:
+                await interaction.response.send_message("❌ Amount must be at least 1!", ephemeral=True)
+                return
+            
+            new_balance = add_coins(user.id, amount)
+            await interaction.response.send_message(f"✅ Added **{amount}** coins to {user.name}. New balance: **{new_balance}**")
+        
+        # Remove coins (mod only)
+        @self.tree.command(name="removecoins", description="Remove coins from a user (staff only)")
+        @app_commands.describe(user="User to remove coins from", amount="Amount of coins")
+        async def removecoins_command(interaction: discord.Interaction, user: discord.Member, amount: int):
+            mod_roles = ["Admin", "Moderator", "Director", "Stage Manager"]
+            user_roles = [r.name for r in interaction.user.roles]
+            has_mod = any(mod_role in user_roles for mod_role in mod_roles)
+            
+            if not has_mod:
+                await interaction.response.send_message("❌ Only staff can use this command!", ephemeral=True)
+                return
+            
+            if amount < 1:
+                await interaction.response.send_message("❌ Amount must be at least 1!", ephemeral=True)
+                return
+            
+            if not remove_coins(user.id, amount):
+                await interaction.response.send_message(f"❌ User doesn't have enough coins!", ephemeral=True)
+                return
+            
+            await interaction.response.send_message(f"✅ Removed **{amount}** coins from {user.name}. New balance: **{get_balance(user.id)}**")
         
         # Sync commands
         await self.tree.sync(guild=None)
