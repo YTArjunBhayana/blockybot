@@ -97,7 +97,7 @@ CATEGORIES_CONFIG = [
             {"name": "Rehearsal Room 2", "type": discord.ChannelType.voice, "topic": "Voice rehearsal space"},
             {"name": "Green Room", "type": discord.ChannelType.voice, "topic": "Chill and wait for your cue"},
         ],
-        "default_permissions": Permissions(connect=True, speak=True, use_video=True),
+        "default_permissions": Permissions(connect=True, speak=True),
     },
 ]
 
