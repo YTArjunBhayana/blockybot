@@ -72,7 +72,6 @@ CATEGORIES_CONFIG = [
         "channels": [
             {"name": "welcome", "type": discord.ChannelType.text, "topic": "Welcome to Rec Room Theater Co.!"},
             {"name": "rules", "type": discord.ChannelType.text, "topic": "Server rules and guidelines"},
-            {"name": "get-roles", "type": discord.ChannelType.text, "topic": "React to get roles!"},
             {"name": "general-chat", "type": discord.ChannelType.text, "topic": "General discussion"},
             {"name": "introduce-yourself", "type": discord.ChannelType.text, "topic": "Tell us about yourself!"},
         ],
@@ -416,24 +415,12 @@ async def setup_server(guild: discord.Guild, user: discord.Member, bot: SetupBot
                     reason=f"Setup requested by {user.name}"
                 )
                 
-                # If this is the rules channel, post the rules
+                # If this is the rules channel, post the rules with reaction
                 if channel_config["name"] == "rules":
                     rules_message = await channel.send(SERVER_RULES)
-                    print(f"  Posted rules in #{channel_config['name']}")
-                
-                # If this is the get-roles channel, post the role message
-                if channel_config["name"] == "get-roles":
-                    role_msg = await channel.send(
-                        "## 🎭 Get Your Roles!\n\n"
-                        "React with ✅ below to get:\n"
-                        "• **Member** role - Full access to chat and voice\n"
-                        "• **Guest** role - Basic access\n\n"
-                        "You can also use `/addrole` to get Actor or Crew Member roles!"
-                    )
-                    await role_msg.add_reaction("✅")
-                    bot.role_message_id = role_msg.id
-                    bot.role_channel_id = channel.id
-                    print(f"  Posted role message in #{channel_config['name']}")
+                    await rules_message.add_reaction("✅")
+                    bot.role_message_id = rules_message.id
+                    print(f"  Posted rules with reaction in #{channel_config['name']}")
                     
             elif channel_config["type"] == discord.ChannelType.voice:
                 channel = await guild.create_voice_channel(
