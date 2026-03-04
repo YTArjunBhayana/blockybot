@@ -284,23 +284,37 @@ class SetupBot(commands.Bot):
             except Exception as e:
                 await interaction.response.send_message(f"❌ Failed to mute: {str(e)}", ephemeral=True)
         
-        # Add role commands
-        @self.tree.command(name="addrole", description="Give yourself a role")
-        @app_commands.describe(role="Role to add")
-        async def addrole_command(interaction: discord.Interaction, role: str):
-            valid_roles = ["Actor", "Crew Member", "Guest"]
-            role_obj = discord.utils.get(interaction.guild.roles, name=role)
+        # Add role to user command (moderation)
+        @self.tree.command(name="addrole", description="Add a role to a user (staff only)")
+        @app_commands.describe(user="User to give role to", role="Role to give")
+        async def addrole_command(interaction: discord.Interaction, user: discord.Member, role: str):
+            # Check if user has moderation permissions
+            mod_roles = ["Admin", "Moderator", "Director", "Stage Manager"]
+            user_roles = [r.name for r in interaction.user.roles]
+            has_mod = any(mod_role in user_roles for mod_role in mod_roles)
             
-            if role not in valid_roles or not role_obj:
-                await interaction.response.send_message(
-                    f"❌ Invalid role. Available: {', '.join(valid_roles)}", 
-                    ephemeral=True
-                )
-                return
+            if not has_mod:
+                # Regular users can still self-assign certain roles
+                valid_self_roles = ["Actor", "Crew Member", "Guest"]
+                if user.id != interaction.user.id:
+                    await interaction.response.send_message("❌ You can only add roles to yourself.", ephemeral=True)
+                    return
+                role_obj = discord.utils.get(interaction.guild.roles, name=role)
+                if role not in valid_self_roles or not role_obj:
+                    await interaction.response.send_message(
+                        f"❌ Invalid role. Available: {', '.join(valid_self_roles)}", 
+                        ephemeral=True
+                    )
+                    return
+            else:
+                role_obj = discord.utils.get(interaction.guild.roles, name=role)
+                if not role_obj:
+                    await interaction.response.send_message(f"❌ Role '{role}' not found.", ephemeral=True)
+                    return
             
             try:
-                await interaction.user.add_roles(role_obj)
-                await interaction.response.send_message(f"✅ Added {role} role!", ephemeral=True)
+                await user.add_roles(role_obj)
+                await interaction.response.send_message(f"✅ Added {role} role to {user.name}!")
             except Exception as e:
                 await interaction.response.send_message(f"❌ Failed: {str(e)}", ephemeral=True)
         
